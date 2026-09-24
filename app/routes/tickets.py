@@ -3,8 +3,9 @@ import json
 import bottle
 
 from app.database import get_session
-from app.kafka_producer import publish_ticket_resolved
-from app.models import TICKET_STATUSES, SupportTicket
+from app.kafka_consumer import persist_status_change
+from app.kafka_producer import publish_ticket_resolved, publish_ticket_status_changed
+from app.models import TICKET_STATUSES, SupportTicket, TicketStatusHistory
 from app.utils import require_api_key
 
 # Allowed status transitions. OPEN -> IN_PROGRESS -> RESOLVED,
@@ -149,11 +150,54 @@ def register_ticket_routes(app):
         ticket.status = new_status
         session.commit()
 
+        # Trigger a Kafka event for every successful status transition, and
+        # persist the same transition into TicketStatusHistory. Persistence is
+        # done synchronously here (using the consumer's shared handler) so the
+        # history record is guaranteed to exist immediately, regardless of
+        # Kafka broker availability.
+        publish_ticket_status_changed(ticket, current_status, new_status)
+        persist_status_change(session, ticket.id, current_status, new_status)
+
         if new_status == "RESOLVED":
             publish_ticket_resolved(ticket)
 
         bottle.response.content_type = "application/json"
         return json.dumps(ticket.to_dict())
+
+    @app.get("/api/v1/tickets/<ticket_id:int>/history")
+    @require_api_key
+    def get_ticket_history(ticket_id):
+        session = get_session()
+        ticket = _get_owned_ticket(session, ticket_id, bottle.request.client_id)
+
+        limit = bottle.request.query.get("limit", 20)
+        offset = bottle.request.query.get("offset", 0)
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 20
+        try:
+            offset = int(offset)
+        except (TypeError, ValueError):
+            offset = 0
+        limit = max(1, min(limit, 100))
+        offset = max(0, offset)
+
+        base_query = session.query(TicketStatusHistory).filter(
+            TicketStatusHistory.ticket_id == ticket.id
+        )
+        total = base_query.count()
+        rows = (
+            base_query.order_by(TicketStatusHistory.id.asc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        items = [h.to_dict() for h in rows]
+
+        bottle.response.content_type = "application/json"
+        return json.dumps({"items": items, "total": total, "limit": limit, "offset": offset})
 
     @app.delete("/api/v1/tickets/<ticket_id:int>")
     @require_api_key

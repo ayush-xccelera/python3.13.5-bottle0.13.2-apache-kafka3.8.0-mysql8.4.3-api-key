@@ -2,7 +2,7 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv(".env_99bee2c7-edf1-4806-8469-e0e5dc0f680f", override=True)
+load_dotenv(".env_ca1491da06cbaa95", override=True)
 
 
 class Config:

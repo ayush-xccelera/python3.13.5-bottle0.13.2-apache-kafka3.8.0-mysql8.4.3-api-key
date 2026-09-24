@@ -39,6 +39,9 @@ class SupportTicket(Base):
     )
 
     client = relationship("ApiKey", back_populates="tickets")
+    status_history = relationship(
+        "TicketStatusHistory", back_populates="ticket", cascade="all, delete-orphan"
+    )
 
     def to_dict(self):
         return {
@@ -49,4 +52,27 @@ class SupportTicket(Base):
             "client_id": self.client_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class TicketStatusHistory(Base):
+    __tablename__ = "ticket_status_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticket_id = Column(
+        Integer, ForeignKey("support_tickets.id"), nullable=False, index=True
+    )
+    previous_status = Column(String(20), nullable=False)
+    new_status = Column(String(20), nullable=False)
+    changed_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    ticket = relationship("SupportTicket", back_populates="status_history")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "ticket_id": self.ticket_id,
+            "previous_status": self.previous_status,
+            "new_status": self.new_status,
+            "changed_at": self.changed_at.isoformat() if self.changed_at else None,
         }

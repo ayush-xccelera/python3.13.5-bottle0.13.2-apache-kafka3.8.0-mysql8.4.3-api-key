@@ -1,5 +1,10 @@
+import datetime
 import json
 import logging
+
+from dotenv import load_dotenv
+
+load_dotenv(".env_ca1491da06cbaa95", override=True)
 
 from app.config import config
 
@@ -50,4 +55,30 @@ def publish_ticket_resolved(ticket):
         return True
     except Exception as exc:  # pragma: no cover
         logger.error("Failed to publish TICKET_RESOLVED event: %s", exc)
+        return False
+
+
+def publish_ticket_status_changed(ticket, previous_status, new_status):
+    """Publish a TICKET_STATUS_CHANGED event to the ticket-events topic.
+
+    Fired on every successful ticket status transition.
+    """
+    producer = _get_producer()
+    event = {
+        "event_type": "TICKET_STATUS_CHANGED",
+        "ticket_id": ticket.id,
+        "client_id": ticket.client_id,
+        "previous_status": previous_status,
+        "new_status": new_status,
+        "changed_at": datetime.datetime.utcnow().isoformat(),
+    }
+    if producer is None:
+        logger.warning("Kafka producer not available, event not published: %s", event)
+        return False
+    try:
+        producer.send(config.KAFKA_TICKET_EVENTS_TOPIC, value=event)
+        producer.flush(timeout=5)
+        return True
+    except Exception as exc:  # pragma: no cover
+        logger.error("Failed to publish TICKET_STATUS_CHANGED event: %s", exc)
         return False
